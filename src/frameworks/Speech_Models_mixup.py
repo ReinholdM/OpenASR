@@ -123,23 +123,21 @@ class Conv_Transformer(torch.nn.Module):
         if rnd > 0.85:
             self.is_mixup = True
         target_lengths = torch.sum(1-target_paddings, dim=-1).long()
-        if self.training:
-            if self.is_mixup:
-                beta_distribution = torch.distributions.beta.Beta(self.eta,self.eta)
-                # Mixup inputs
-                lambda_ = beta_distribution.sample([]).item()
-                index = torch.randperm(batch_wave.shape[0]).cuda()
-                batch_wave = lambda_*batch_wave + (1-lambda_)*batch_wave[index, :, :] 
-
-        logits = self.get_logits(batch_wave, lengths,
-                target_ids, target_lengths)
-        loss = cal_ce_loss(logits, target_labels, target_paddings, label_smooth)
-        if self.training:
-            if self.is_mixup:
-                logits_mix = self.get_logits(batch_wave, lengths,
-                            target_ids[index, :], target_lengths[index, :])
-                loss_mix = cal_ce_loss(logits_mix, target_labels[index, :], target_paddings[index, :], label_smooth)
-                loss = lambda_*loss + (1-lambda_)*loss_mix
+        if self.training and self.is_mixup:
+            beta_distribution = torch.distributions.beta.Beta(self.eta,self.eta)
+            # Mixup inputs
+            lambda_ = beta_distribution.sample([]).item()
+            index = torch.randperm(batch_wave.shape[0]).cuda()
+            logits = self.get_logits(batch_wave.repeat([2, 1, 1]), 
+                                     lengths.repeat([2]),
+                                     torch.cat([target_ids, target_ids[index, :]], 0), 
+                                     torch.cat([target_lengths, target_lengths[index]], 0))
+            loss = cal_ce_loss(logits[:len(logits)//2, :, :], target_labels, target_paddings, label_smooth)
+            loss_mix = cal_ce_loss(logits[len(logits)//2:, :, :], target_labels[index, :], target_paddings[index, :], label_smooth)
+            loss = (1-lambda_) * loss + lambda_ * loss_mix
+        else:
+            logits = self.get_logits(batch_wave, lengths, target_ids, target_lengths)
+            loss = cal_ce_loss(logits, target_labels, target_paddings, label_smooth)
 
         return loss
 
